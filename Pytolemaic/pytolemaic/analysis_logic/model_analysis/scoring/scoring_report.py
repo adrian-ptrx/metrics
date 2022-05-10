@@ -4,9 +4,9 @@ import numpy
 import sklearn.calibration
 from matplotlib import pyplot as plt
 from sklearn.metrics import confusion_matrix, classification_report, \
-    RocCurveDisplay, PrecisionRecallDisplay, \
     precision_recall_curve, average_precision_score, auc, roc_curve, \
     brier_score_loss
+#     RocCurveDisplay, PrecisionRecallDisplay, 
 from sklearn.utils.multiclass import unique_labels
 
 from pytolemaic.utils.base_report import Report

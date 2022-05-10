@@ -32,10 +32,11 @@ class EncodeWrapper():
 
         if self.encode_target:
             self.yencoder = LabelEncoderProtected()
-            self.yencoder.fit(y, feature_types=[FeatureTypes.categorical], feature_names='target')
+            self.yencoder.fit(y, feature_types=[FeatureTypes.categorical], feature_names=['target'])
         else:
             self.yencoder = None
-
+#         print(f'self.xencoder: {self.xencoder}    x:{x}')
+#         print(f'self.yencoder: {self.yencoder}    y:{y}')
         self.model.fit(x if self.xencoder is None else self.xencoder.transform(x),
                        y if self.yencoder is None else self.yencoder.transform(y).ravel())
 
@@ -81,7 +82,6 @@ class UncertaintyModelBase():
     def fit(self, dmd_test: DMD, **kwargs):
         self.dmd_supported = GeneralUtils.dmd_supported(model=self.model,
                                                         dmd=dmd_test)
-
         self.fit_uncertainty_model(dmd_test, **kwargs)
         return self
 
@@ -449,11 +449,16 @@ class UncertaintyModelClassifier(UncertaintyModelBase):
 
             self.uncertainty_model = GeneralUtils.simple_imputation_pipeline(
                 estimator)
-            self.uncertainty_model = EncodeWrapper(self.uncertainty_model, encode_target=True)
-
+            self.uncertainty_model = EncodeWrapper(self.uncertainty_model, encode_target=False)
+            # do not encode the target labels (does not apply the custom encoding dict)
+            # instead, decode the predictor classes before calling
             y_pred = self.predict(dmd_test)
+#             print(f'y_pred: {y_pred}')
             is_correct = numpy.array(y_pred.ravel() == dmd_test.target.ravel(),
                                      dtype=int)
+#             print(f' dmd_test.target.ravel(): {dmd_test.target.ravel()}')
+#             print(f' is_correct: {is_correct}')
+#             print(f' is_correct.ravel(): {is_correct.ravel()}')
 
             self.uncertainty_model.fit(dmd_test.values,
                                        is_correct.ravel(),
@@ -471,6 +476,7 @@ class UncertaintyModelClassifier(UncertaintyModelBase):
             # calibration curve
 
             y_pred = self.predict(cal_curve_samples).ravel()
+#             print(f'y_pred: {y_pred}')
             y_true = cal_curve_samples.target.ravel()
             uncertainty = self.uncertainty(cal_curve_samples)
             self._cal_curve_uncertainty = uncertainty
