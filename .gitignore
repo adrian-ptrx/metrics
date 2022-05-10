@@ -1,0 +1,11 @@
+**/resources
+**/scripts
+**/build
+**/examples
+**/docs
+**/tests
+**/.DS_Store
+**/dist
+**/Changelog
+*.pyc
+
