@@ -7,5 +7,8 @@
 **/.DS_Store
 **/dist
 **/Changelog
+**/bin
+**/logs
+**/settings
 *.pyc
 
