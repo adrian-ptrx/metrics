@@ -18,6 +18,10 @@ class Metric():
 class CustomMetrics:
     @classmethod
     def auc(cls, y_true, y_pred):
+        # print(f'CustomMetrics.auc  y_pred.shape[1]={y_pred.shape[1]}:\ny_true={y_true[:2]}\ny_pred={y_pred[:2]}\n ')
+        for i, (t, p) in enumerate(zip(y_true.ravel(), y_pred)):
+            print(t,'-', p)
+            if i > 10: break
         if y_pred.shape[1] == 1:
             return sklearn_metrics.roc_auc_score(y_true=y_true, y_score=y_pred)
         else:

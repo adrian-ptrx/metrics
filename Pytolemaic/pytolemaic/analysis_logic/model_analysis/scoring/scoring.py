@@ -40,9 +40,15 @@ class Scoring():
 
         confusion_matrix, scatter, classification_report = None, None, None
         if is_classification:
-
+            # print(f'score_value_report   parameter y_proba: {y_proba[:10]}')
+            # print(f'score_value_report   parameter y_pred: {y_pred[:10]}')
             y_proba = y_proba if y_proba is not None else model.predict_proba(x_test)
-            y_pred = y_pred if y_pred is not None else numpy.argmax(y_proba, axis=1)
+            if y_pred is None:
+                # do not assume that the classifier positive class predictions are in column [1]
+                if model.classes_[0] == 0:
+                    y_pred = numpy.argmax(y_proba, axis=1)
+                else:
+                    y_pred = numpy.argmin(y_proba, axis=1)
 
             confusion_matrix = ConfusionMatrixReport(y_true=y_true, y_pred=y_pred,
                                                      labels=labels if labels is not None else unique_labels(y_true,
@@ -53,16 +59,30 @@ class Scoring():
             for metric in self.metrics:
                 if not metric.ptype == CLASSIFICATION:
                     continue
+
+                # check class index
+                if model.classes_[0] == 0:
+                    ypr = y_proba
+                else:
+                    # flip probs so hardcoded assumptions in code work
+                    # yt = 1-y_true
+                    ypr = numpy.hstack((y_proba[:,1].reshape((-1,1)),y_proba[:,0].reshape((-1,1))))
+                # print(f'score_value_report   {model.classes_[0]} ypr.shape:{ypr.shape} ')
+
                 if metric.is_proba:
-                    yp = y_proba
+                    yp = ypr
                 else:
                     yp = y_pred
-
+                # print(f'score_value_report   metric.is_proba:{metric.is_proba}    yp: {yp[:10]}')
                 score = metric.function(y_true, yp)
                 ci_low, ci_high = Metrics.confidence_interval(metric,
                                                               y_true=y_true,
-                                                              y_pred=y_pred,
-                                                              y_proba=y_proba)
+                                                              y_pred=yp,
+                                                              y_proba=ypr)
+                # print(f'score_value_report: confidence intervals')
+                # print(f'{metric.name}: score={score}   ci_low={ci_low}   ci_high={ci_high} ')
+                # print(f'{metric.is_proba}:\ny_true={y_true[:10]}\ny_pred={y_pred[:10]}\ny_proba={y_proba[:10]} ')
+                # print(f'{metric.is_proba}:\nyp={yp[:10]}\nypr={ypr[:10]}\n')
                 score_report.append(ScoringMetricReport(
                     metric_name=metric.name,
                     value=score,

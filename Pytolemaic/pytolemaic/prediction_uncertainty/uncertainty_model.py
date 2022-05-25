@@ -2,6 +2,7 @@ import multiprocessing
 
 import numpy
 import sklearn
+import sklearn.calibration
 from matplotlib import pyplot as plt
 from pytolemaic.utils.constants import FeatureTypes
 from pytolemaic.utils.constants import REGRESSION, CLASSIFICATION

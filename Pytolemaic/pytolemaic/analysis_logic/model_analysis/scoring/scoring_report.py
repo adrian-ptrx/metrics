@@ -1,13 +1,16 @@
 import itertools
 
 import numpy
-import sklearn.calibration
+
 from matplotlib import pyplot as plt
 from sklearn.metrics import confusion_matrix, classification_report, \
     precision_recall_curve, average_precision_score, auc, roc_curve, \
     brier_score_loss
 #     RocCurveDisplay, PrecisionRecallDisplay, 
 from sklearn.utils.multiclass import unique_labels
+from sklearn.utils import column_or_1d
+from sklearn.preprocessing import label_binarize
+from sklearn.utils.validation import check_consistent_length
 
 from pytolemaic.utils.base_report import Report
 from pytolemaic.utils.general import GeneralUtils
@@ -24,8 +27,8 @@ class ROCCurveReport(Report):
                                              pos_label=1, sample_weight=sample_weight,
                                              drop_intermediate=True)
 
-            self._roc_curve[label] = dict(fpr=fpr, tpr=tpr, thresholds=thresholds)
-            self._auc[label] = auc(fpr, tpr)
+            self._roc_curve[class_index] = dict(fpr=fpr, tpr=tpr, thresholds=thresholds)
+            self._auc[class_index] = auc(fpr, tpr)
 
     @property
     def labels(self):
@@ -147,29 +150,96 @@ class PrecisionRecallCurveReport(Report):
 
 class CalibrationCurveReport(Report):
     def __init__(self, y_true, y_proba, labels=None, sample_weight=None,
-                 n_bins=10):
+                 n_bins=10, binning_method='uniform'):
         self._labels = labels if labels is not None else unique_labels(y_true).tolist()
         self._calibration_curve = {}
         self._brier_loss = {}
         self._y_proba = y_proba
         self._n_bins = n_bins
+        # print(f'CalibrationCurveReport._labels: {self._labels}')
+
+        def _customized_calibration_curve(y_true, y_prob, labels,
+                                          normalize=False, n_bins=5, strategy='uniform'):
+            # see sklearn
+            y_true = column_or_1d(y_true)
+            y_prob = column_or_1d(y_prob)
+            check_consistent_length(y_true, y_prob)
+            # print(f'_customized_calibration_curve:\ny_true     -     y_prob')
+            # for i, (t, p) in enumerate(zip(y_true.ravel(), y_prob)):
+            #     print(t,'-', p)
+            #     if i > 10: break
+
+            if normalize:  # Normalize predicted values into interval [0, 1]
+                y_prob = (y_prob - y_prob.min()) / (y_prob.max() - y_prob.min())
+            elif y_prob.min() < 0 or y_prob.max() > 1:
+                raise ValueError("y_prob has values outside [0, 1] and normalize is "
+                                 "set to False.")
+
+            # labels = numpy.unique(y_true)
+            if len(labels) > 2:
+                raise ValueError("Only binary classification is supported. "
+                                 "Provided labels %s." % labels)
+            # y_true = label_binarize(y_true, labels)[:, 0]
+
+            if strategy == 'quantile':  # Determine bin edges by distribution of data
+                quantiles = numpy.linspace(0, 1, n_bins + 1)
+                bins = numpy.percentile(y_prob, quantiles * 100)
+                bins[-1] = bins[-1] + 1e-8
+            elif strategy == 'uniform':
+                bins = numpy.linspace(0., 1. + 1e-8, n_bins + 1)
+            else:
+                raise ValueError("Invalid entry to 'strategy' input. Strategy "
+                                 "must be either 'quantile' or 'uniform'.")
+
+            # Return the indices of the bins to which each value in input array belongs.
+            binids = numpy.digitize(y_prob, bins) - 1
+
+            # Count number of occurrences of each value in array of non-negative ints.
+            #   - weighting by y_prob computes the sum of predicted probs in each bin
+            bin_sums = numpy.bincount(binids, weights=y_prob, minlength=len(bins))
+            #   - weighting by y_true computes the count of positives in each bin
+            bin_true = numpy.bincount(binids, weights=y_true, minlength=len(bins))
+            #   - unweighted count computes the total count of examples in each bin
+            bin_total = numpy.bincount(binids, minlength=len(bins))
+
+            # logical mask of non-zero elements
+            nonzero = bin_total != 0
+            # compute probabilities for the non-zero bins
+            prob_true = (bin_true[nonzero] / bin_total[nonzero])
+            prob_pred = (bin_sums[nonzero] / bin_total[nonzero])
+
+            return prob_true, prob_pred, nonzero, bin_total, bins, bin_true
 
         for class_index, label in enumerate(self.labels):
-            fraction_of_positives, mean_predicted_value = \
-                sklearn.calibration.calibration_curve(
-                    y_true=y_true == class_index,
+            # fraction_of_positives, mean_predicted_value = \
+            #     sklearn.calibration.calibration_curve(
+            #         y_true=y_true == class_index,
+            #         y_prob=y_proba[:, class_index],
+            #         normalize=False,
+            #         n_bins=n_bins,
+            #         strategy=binning_method)
+            fraction_of_positives, mean_predicted_value, nonzero, bin_total, bins, bin_true = \
+                _customized_calibration_curve(
+                    y_true= y_true == label,
                     y_prob=y_proba[:, class_index],
+                    labels=self.labels,
                     normalize=False,
                     n_bins=n_bins,
-                    strategy='uniform')
-            self._calibration_curve[label] = dict(
+                    strategy=binning_method)
+
+            self._calibration_curve[class_index] = dict(
                 fraction_of_positives=fraction_of_positives,
-                mean_predicted_value=mean_predicted_value)
-            self._brier_loss[label] = brier_score_loss(
-                y_true=y_true == class_index,
+                mean_predicted_value=mean_predicted_value,
+                nonzero=nonzero,
+                bin_true=bin_true,
+                bin_total=bin_total,
+                bins=bins)
+            self._brier_loss[class_index] = brier_score_loss(
+                y_true= y_true == label,
                 y_prob=y_proba[:, class_index],
                 sample_weight=sample_weight,
                 pos_label=1)
+
 
     @property
     def labels(self):
@@ -207,7 +277,7 @@ class CalibrationCurveReport(Report):
 
         ax1.plot([0, 1], [0, 1], "k:", label="Perfectly calibrated")
 
-        ax1.set_title("Calibartion Curve")
+        ax1.set_title("Calibration Curve")
         possible_colors = GeneralUtils.shuffled_colors()
         for class_index, label in enumerate(self.labels):
             mean_predicted_value = self._calibration_curve[label][
@@ -267,7 +337,8 @@ class SklearnClassificationReport(Report):
                  sample_weight=None, digits=3):
         self._labels = labels if labels is not None else unique_labels(y_true,
                                                                        y_pred).tolist()
-
+        # print(f'labels: {labels}')
+        # print(f'SklearnClassificationReport._labels: {self._labels}')
         self._sample_weight = sample_weight
 
         self._sklearn_performance_summary_text = classification_report(
@@ -291,6 +362,11 @@ class SklearnClassificationReport(Report):
                                                          y_proba=y_proba,
                                                          labels=self.labels,
                                                          sample_weight=sample_weight)
+        self._calibration_curve_quantile = CalibrationCurveReport(y_true=y_true,
+                                                         y_proba=y_proba,
+                                                         labels=self.labels,
+                                                         sample_weight=sample_weight,
+                                                         binning_method='quantile')
 
         self._precision_recall_curve = PrecisionRecallCurveReport(
             y_true=y_true, y_proba=y_proba,
@@ -316,6 +392,10 @@ class SklearnClassificationReport(Report):
         return self._calibration_curve
 
     @property
+    def calibration_curve_quantile(self) -> CalibrationCurveReport:
+        return self._calibration_curve_quantile
+
+    @property
     def sklearn_performance_summary(self):
         return self._sklearn_performance_summary_dict
 
@@ -325,6 +405,7 @@ class SklearnClassificationReport(Report):
             roc_curve=self.roc_curve.to_dict(printable=printable),
             precision_recall_curve=self.precision_recall_curve.to_dict(printable=printable),
             calibration_curve=self.calibration_curve.to_dict(printable=printable),
+            calibration_curve_quantile=self.calibration_curve_quantile.to_dict(printable=printable),
             labels=self.labels)
         return self._printable_dict(out, printable=printable)
 
@@ -335,6 +416,7 @@ class SklearnClassificationReport(Report):
             roc_curve="ROC curve report",
             precision_recall_curve="Precision-Recall curve report",
             calibration_curve="Calibration curve report",
+            calibration_curve_quantile="Calibration curve report (quantile)",
             labels="The class labels"
         )
 
@@ -358,6 +440,8 @@ class SklearnClassificationReport(Report):
 
         # new figure
         self.calibration_curve.plot(figsize=figsize)
+        # new figure
+        self.calibration_curve_quantile.plot(figsize=figsize)
 
         plt.tight_layout()
         plt.draw()
@@ -395,13 +479,24 @@ class SklearnClassificationReport(Report):
                                     self.roc_curve.insights(),
                                     self.precision_recall_curve.insights(),
                                     self.calibration_curve.insights(),
+                                    self.calibration_curve_quantile.insights(),
                                     ))
 
 
 class ConfusionMatrixReport(Report):
     def __init__(self, y_true, y_pred, labels: list = None):
+        # tp = numpy.asarray([t==1 and p==1 for t, p in zip(y_true.ravel(), y_pred)]).sum()
+        # tn = numpy.asarray([t==0 and p==0 for t, p in zip(y_true.ravel(), y_pred)]).sum()
+        # fp = numpy.asarray([t==0 and p==1 for t, p in zip(y_true.ravel(), y_pred)]).sum()
+        # fn = numpy.asarray([t==1 and p==0 for t, p in zip(y_true.ravel(), y_pred)]).sum()
+        # print(f'ConfusionMatrixReport.init: labels={labels}\ny_true={y_true.ravel()}\ny_pred={y_pred}\n')
+        # print(f'TP={tp}   TN={tn}   FP={fp}  FN={fn}\ny_true   -  y_pred')
+        for i, (t, p) in enumerate(zip(y_true.ravel(), y_pred)):
+            print(t,'-', p)
+            if i > 10: break
         self._confusion_matrix = confusion_matrix(y_true=y_true, y_pred=y_pred,
-                                                  labels=unique_labels(y_true, y_pred)).tolist()
+                                                  labels=labels)
+        # labels=unique_labels(y_true, y_pred)).tolist()
         self._labels = labels if labels is not None else unique_labels(y_true, y_pred).tolist()
         if isinstance(self._labels, numpy.ndarray):
             self._labels = self._labels.tolist()
@@ -422,7 +517,7 @@ class ConfusionMatrixReport(Report):
         return GeneralUtils.f3(cm).tolist()
 
     def to_dict(self, printable=False):
-        out = dict(confusion_matrix=self.confusion_matrix,
+        out = dict( confusion_matrix=self.confusion_matrix,
                     normalized_confusion_matrix=self.normalized_confusion_matrix,
                     labels=self.labels)
         return self._printable_dict(out, printable=printable)
@@ -441,8 +536,6 @@ class ConfusionMatrixReport(Report):
 
         cm = numpy.array(confusion_matrix)
         im = ax.imshow(cm, interpolation='nearest', cmap=cmap)
-
-        # ax.figure.colorbar(im, ax=ax)
 
         ax.set(xticks=[-0.5] + numpy.arange(cm.shape[1]).tolist() + [cm.shape[1] - 0.5],
                yticks=[-0.5] + numpy.arange(cm.shape[0]).tolist() + [cm.shape[0] - 0.5],
@@ -466,6 +559,18 @@ class ConfusionMatrixReport(Report):
                 ax.text(j, i, format(cm[i, j], fmt),
                         ha="center", va="center",
                         color="white" if cm[i, j] > thresh else "black")
+
+        #place the ticks and x-label at the top
+        ax.xaxis.tick_top()
+        ax.xaxis.set_label_position('top')
+
+        # if the classifier predicts the target class in column index 0, reverse the axes of the plot
+        if labels[0] == 1:
+            ax.set_xlim(ax.get_xlim()[::-1])
+            ax.set_ylim(ax.get_ylim()[::-1])
+            print(f'reversing axes due to class order {labels}')
+            # ax.set(xticklabels=[''] + [0, 1] + [''], yticklabels=[''] + [0, 1] + [''])
+
         return ax
 
     def plot(self, axs=None, figsize=(12,5)):

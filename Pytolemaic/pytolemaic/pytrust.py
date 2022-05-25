@@ -273,7 +273,7 @@ class PyTrust():
         metrics = Metrics.supported_metrics()
 
         scoring = scoring or Scoring(metrics=metrics)
-
+        # print(f'PyTrustcreate_scoring_report   parameter y_proba: {y_proba}')
         score_values_report, confusion_matrix, scatter, classification_report = \
             scoring.score_value_report(model=model,
                                        dmd_test=test,
@@ -365,7 +365,7 @@ class PyTrust():
         metrics = Metrics.supported_metrics()
 
         self.scoring = Scoring(metrics=metrics)
-
+        # print(f'pytrust._create_scoring_report  self.y_proba_test: {self.y_proba_test}')
         return self.create_scoring_report(model=self.model, train=self.train, test=self.test, metric=self.metric,
                                           y_pred=self.y_pred_test, y_proba=self.y_proba_test, scoring=self.scoring)
 
@@ -431,15 +431,16 @@ class PyTrust():
     def y_pred_test(self):
 
         test = self.test if self.model_support_dmd else self.test.values
-        if self.y_proba_test is not None:  # save some time
-            y_pred_test = numpy.argmax(self.y_proba_test, axis=1)
-        else:
-            y_pred_test = self.model.predict(test)
+        # if self.y_proba_test is not None:  # save some time
+        #     y_pred_test = numpy.argmax(self.y_proba_test, axis=1)
+        # else:
+        y_pred_test = self.model.predict(test)
         return y_pred_test
 
     @property
     @cache
     def y_proba_test(self):
+        # print(f'y_proba_test: is_classification={self.is_classification}   model_support_dmd={self.model_support_dmd}')
         if not self.is_classification:
             return None
 
