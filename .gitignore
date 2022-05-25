@@ -5,6 +5,8 @@
 **/docs
 **/tests
 **/.DS_Store
+**/.idea
+**/.ipynb_checkpoints
 **/dist
 **/Changelog
 **/bin
